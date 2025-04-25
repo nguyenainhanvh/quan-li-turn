@@ -1,0 +1,473 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QUẢN LÍ TURN</title>
+  <!-- React and dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js"></script>
+  <style>
+    body { font-family: 'Arial', sans-serif; }
+    .timer { font-size: 0.8rem; color: #4b5563; }
+    .table-container { max-height: 80vh; overflow-y: auto; }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <div id="root"></div>
+  <script type="text/babel">
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyAz1JmrkO1ckmQKGyweFW0XAq5YoXEl27I",
+      authDomain: "quan-li-turn.firebaseapp.com",
+      databaseURL: "https://quan-li-turn-default-rtdb.firebaseio.com",
+      projectId: "quan-li-turn",
+      storageBucket: "quan-li-turn.firebasestorage.app",
+      messagingSenderId: "674796321064",
+      appId: "1:674796321064:web:2cb19935435f2cc529f81d",
+      measurementId: "G-ECQSRKY2YR"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Initialize React root
+    const { useState, useEffect } = React;
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+
+    // Initial data
+    const initialSheet2 = [
+      { name: 'ANNA', pedicure: 1, gel_manicure: 1, dipping: 1, fill_in: 0, acrylic: 1, bio: 1, gel_x: 1, man: 1, describe: 'Đang làm', symbol: 'W', value: 100 },
+      { name: 'MARIA', pedicure: 1, gel_manicure: 1, dipping: 1, fill_in: 0, acrylic: 1, bio: 1, gel_x: 1, man: 1, describe: 'Đang làm khách hẹn', symbol: 'W/A', value: 100 },
+      { name: 'JOHN', pedicure: 1, gel_manicure: 1, dipping: 1, fill_in: 0, acrylic: 1, bio: 1, gel_x: 1, man: 1, describe: 'Khách hẹn', symbol: 'apt', value: '1 hoặc 0' },
+      { name: 'PHILIP', pedicure: 1, gel_manicure: 1, dipping: 1, fill_in: 0, acrylic: 1, bio: 1, gel_x: 1, man: 1, describe: 'Làm tay thường', symbol: 'R.M', value: 0.5 },
+      { name: 'DON', pedicure: 1, gel_manicure: 1, dipping: 1, fill_in: 0, acrylic: 1, bio: 1, gel_x: 1, man: 1, describe: 'Làm tay Gel', symbol: 'G.M', value: 1 },
+    ];
+
+    const initialSheet1 = Array.from({ length: 30 }, (_, i) => ({
+      id: i + 1,
+      name: '',
+      states: Array(15).fill(''),
+      total: 0,
+      nextTurn: '',
+      filter: '',
+      timers: Array(15).fill(0),
+      timerActive: Array(15).fill(false),
+    }));
+
+    // Main App component
+    const App = () => {
+      const [sheet1, setSheet1] = useState(initialSheet1);
+      const [sheet2, setSheet2] = useState(initialSheet2);
+      const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+      const [isOn, setIsOn] = useState(true);
+      const [filterCriteria, setFilterCriteria] = useState('');
+
+      // Sync with Firebase
+      useEffect(() => {
+        const sheet1Ref = db.ref('sheet1');
+        sheet1Ref.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            setSheet1(Object.values(data));
+          } else {
+            sheet1Ref.set(initialSheet1);
+          }
+        });
+
+        const sheet2Ref = db.ref('sheet2');
+        sheet2Ref.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            setSheet2(Object.values(data));
+          } else {
+            sheet2Ref.set(initialSheet2);
+          }
+        });
+
+        return () => {
+          sheet1Ref.off();
+          sheet2Ref.off();
+        };
+      }, []);
+
+      // Timer handling
+      useEffect(() => {
+        const interval = setInterval(() => {
+          setSheet1(prev => {
+            const updated = prev.map(row => ({
+              ...row,
+              timers: row.timers.map((time, i) => row.timerActive[i] ? time + 5 : time),
+            }));
+            db.ref('sheet1').set(updated);
+            return updated;
+          });
+        }, 5000); // Sync every 5 seconds
+        return () => clearInterval(interval);
+      }, []);
+
+      // Calculate totals and sort
+      const calculateTotalsAndSort = (data) => {
+        return data.map(row => {
+          let aptCount = 0;
+          const total = row.states.reduce((sum, state, i) => {
+            if (!state) return sum;
+            const sheet2Row = sheet2.find(s => s.symbol === state);
+            if (!sheet2Row) return sum;
+            if (state === 'apt') {
+              aptCount++;
+              return sum + (aptCount % 2 === 1 ? 1 : 0);
+            }
+            return sum + (parseFloat(sheet2Row.value) || 0);
+          }, 0);
+          return { ...row, total: isOn ? Math.floor(total) : total };
+        }).sort((a, b) => {
+          if (a.total === b.total) return a.id - b.id;
+          return a.total - b.total;
+        }).map((row, i, arr) => ({
+          ...row,
+          nextTurn: arr[i]?.name || '',
+          filter: filterCriteria ? (sheet2.find(s => s.name === row.name)?.[filterCriteria] ? row.name : '') : row.name,
+        }));
+      };
+
+      // Update Sheet1
+      const updateSheet1 = (newSheet1) => {
+        const updated = calculateTotalsAndSort(newSheet1);
+        db.ref('sheet1').set(updated);
+        setSheet1(updated);
+      };
+
+      // Handle name change
+      const handleNameChange = (rowIndex, value) => {
+        const newSheet1 = [...sheet1];
+        newSheet1[rowIndex].name = value;
+        updateSheet1(newSheet1);
+      };
+
+      // Handle state change
+      const handleStateChange = (rowIndex, colIndex, value) => {
+        const newSheet1 = [...sheet1];
+        newSheet1[rowIndex].states[colIndex] = value;
+        newSheet1[rowIndex].timerActive[colIndex] = value === 'W' || value === 'W/A';
+        updateSheet1(newSheet1);
+      };
+
+      // Handle reset
+      const handleReset = () => {
+        db.ref('sheet1').set(initialSheet1);
+      };
+
+      // Handle filter
+      const handleFilter = () => {
+        setFilterCriteria('pedicure');
+        updateSheet1(sheet1);
+      };
+
+      // Handle clear filter
+      const handleClearFilter = () => {
+        setFilterCriteria('');
+        updateSheet1(sheet1);
+      };
+
+      // Handle tip (placeholder)
+      const handleTip = () => {
+        alert('Tính năng tip chưa được triển khai');
+      };
+
+      // Handle guide
+      const handleGuide = () => {
+        alert('Hướng dẫn: Nhập tên và trạng thái qua dropdown. Tổng được tính tự động. Sắp xếp ở cột NEXT TURN.');
+      };
+
+      // Handle print
+      const handlePrint = () => {
+        window.print();
+      };
+
+      // Handle Sheet2 data save
+      const handleSaveSheet2 = (newData) => {
+        db.ref('sheet2').set(newData);
+        setSheet2(newData);
+        setIsDataModalOpen(false);
+      };
+
+      // Format timer
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      };
+
+      return (
+        <div className="container mx-auto p-4">
+          <h1 className="text-3xl font-bold text-center mb-4">QUẢN LÍ TURN</h1>
+          <div className="flex space-x-2 mb-4">
+            <button onClick={handleReset} className="bg-red-500 text-white px-4 py-2 rounded">Reset</button>
+            <button onClick={() => setIsDataModalOpen(true)} className="bg-blue-500 text-white px-4 py-2 rounded">Data</button>
+            <button onClick={handleFilter} className="bg-green-500 text-white px-4 py-2 rounded">Lọc</button>
+            <button onClick={handleClearFilter} className="bg-yellow-500 text-white px-4 py-2 rounded">Xóa Lọc</button>
+            <button onClick={handleTip} className="bg-purple-500 text-white px-4 py-2 rounded">Tip</button>
+            <button onClick={handleGuide} className="bg-gray-500 text-white px-4 py-2 rounded">Hướng Dẫn</button>
+            <button onClick={() => setIsOn(!isOn)} className="bg-orange-500 text-white px-4 py-2 rounded">{isOn ? 'ON' : 'OFF'}</button>
+            <button onClick={handlePrint} className="bg-teal-500 text-white px-4 py-2 rounded">In</button>
+          </div>
+          <div className="table-container">
+            <table className="w-full border-collapse border">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="border p-2">TT</th>
+                  <th className="border p-2">NAME</th>
+                  {Array.from({ length: 15 }, (_, i) => (
+                    <th key={i} className="border p-2">T{i + 1}</th>
+                  ))}
+                  <th className="border p-2">TOTAL</th>
+                  <th className="border p-2">NEXT TURN</th>
+                  <th className="border p-2">FILTER</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sheet1.map((row, rowIndex) => (
+                  <tr key={row.id}>
+                    <td className="border p-2 text-center">{row.id}</td>
+                    <td className="border p-2">
+                      <select
+                        value={row.name}
+                        onChange={(e) => handleNameChange(rowIndex, e.target.value)}
+                        className="w-full p-1"
+                      >
+                        <option value="">Chọn</option>
+                        {sheet2.map(s => (
+                          <option key={s.name} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    {row.states.map((state, colIndex) => (
+                      <td key={colIndex} className="border p-2">
+                        <select
+                          value={state}
+                          onChange={(e) => handleStateChange(rowIndex, colIndex, e.target.value)}
+                          className="w-full p-1"
+                        >
+                          <option value="">Chọn</option>
+                          {sheet2.map(s => (
+                            <option key={s.symbol} value={s.symbol}>{s.symbol}</option>
+                          ))}
+                        </select>
+                        {row.timerActive[colIndex] && (
+                          <div className="timer">{formatTime(row.timers[colIndex])}</div>
+                        )}
+                      </td>
+                    ))}
+                    <td className="border p-2 text-center">{row.total}</td>
+                    <td className="border p-2">{row.nextTurn}</td>
+                    <td className="border p-2">{row.filter}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {isDataModalOpen && (
+            <Sheet2Modal
+              sheet2={sheet2}
+              onSave={handleSaveSheet2}
+              onCancel={() => setIsDataModalOpen(false)}
+            />
+          )}
+        </div>
+      );
+    };
+
+    // Sheet2 Modal component
+    const Sheet2Modal = ({ sheet2, onSave, onCancel }) => {
+      const [data, setData] = useState(sheet2);
+
+      const handleChange = (rowIndex, field, value) => {
+        const newData = [...data];
+        newData[rowIndex][field] = value;
+        setData(newData);
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg w-3/4 max-h-[80vh] overflow-y-auto">
+            <h2 className="text-2xl mb-4">Nhập Dữ Liệu Sheet2</h2>
+            <table className="w-full border-collapse border">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="border p-2">Tên</th>
+                  <th className="border p-2">Pedicure</th>
+                  <th className="border p-2">Gel Manicure</th>
+                  <th className="border p-2">Dipping</th>
+                  <th className="border p-2">Fill In</th>
+                  <th className="border p-2">Acrylic</th>
+                  <th className="border p-2">Bio</th>
+                  <th className="border p-2">Gel X</th>
+                  <th className="border p-2">Man</th>
+                  <th className="border p-2">Mô Tả</th>
+                  <th className="border p-2">Ký Hiệu</th>
+                  <th className="border p-2">Giá Trị</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((row, i) => (
+                  <tr key={i}>
+                    <td className="border p-2">
+                      <input
+                        type="text"
+                        value={row.name}
+                        onChange={(e) => handleChange(i, 'name', e.target.value)}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.pedicure}
+                        onChange={(e) => handleChange(i, 'pedicure', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.gel_manicure}
+                        onChange={(e) => handleChange(i, 'gel_manicure', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.dipping}
+                        onChange={(e) => handleChange(i, 'dipping', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.fill_in}
+                        onChange={(e) => handleChange(i, 'fill_in', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.acrylic}
+                        onChange={(e) => handleChange(i, 'acrylic', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.bio}
+                        onChange={(e) => handleChange(i, 'bio', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.gel_x}
+                        onChange={(e) => handleChange(i, 'gel_x', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="number"
+                        value={row.man}
+                        onChange={(e) => handleChange(i, 'man', parseInt(e.target.value))}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="text"
+                        value={row.describe}
+                        onChange={(e) => handleChange(i, 'describe', e.target.value)}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="text"
+                        value={row.symbol}
+                        onChange={(e) => handleChange(i, 'symbol', e.target.value)}
+                        className="w-full p-1"
+                      />
+                    </td>
+                    <td className="border p-2">
+                      <input
+                        type="text"
+                        value={row.value}
+                        onChange={(e) => handleChange(i, 'value', e.target.value)}
+                        className="w-full p-1"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex space-x-2 mt-4">
+              <button onClick={() => onSave(data)} className="bg-green-500 text-white px-4 py-2 rounded">Lưu</button>
+              <button onClick={onCancel} className="bg-red-500 text-white px-4 py-2 rounded">Không Lưu</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Render the app
+    root.render(<App />);
+  </script>
+</body>
+</html>
